@@ -780,9 +780,8 @@ AS_EOF
 
             if [ -f "$GCCDIR/usr/libexec/gcc/darwin/ppc/ld" ]; then
                 echo "*** Not installing Xcode3ld.tar.gz (found installed in $GCCDIR/usr/libexec/gcc/darwin/ppc/ld, uninstall first to force install)"
-            elif [ $XCODE42 -eq 1 ]; then
-                echo "*** Not installing Xcode3ld.tar.gz (not required for Xcode <= 4.2.1)"
             else
+                # NOTE: This is not necessarily required for Xcode <= 4.2.1, but is needed to make 10.4u SDK work
                 mkdir -p "$GCCDIR/tmp"
                 (gzip -dc Xcode3ld.tar.gz | (cd "$GCCDIR/tmp" || exit; tar xf -))
                 cp "$GCCDIR/tmp/usr/bin/ld" "$GCCDIR/usr/libexec/gcc/darwin/ppc/"
@@ -799,12 +798,18 @@ AS_EOF
                 # Xcode 8's ld fails to link i386 and x86_64 for OSX 10.5: https://github.com/devernay/xcodelegacy/issues/30
                 # Since this ld is from Xcode 3.2.6 for OSX 10.6, this should be OK if the target OS is < 10.6
                 # (which is checked by the stub ld script)
-                for arch in i386 x86_64; do
-                    mkdir -p "$GCCDIR/usr/libexec/gcc/darwin/$arch"
-                    ln "$GCCDIR/usr/libexec/gcc/darwin/ppc/ld" "$GCCDIR/usr/libexec/gcc/darwin/$arch/ld"
-                    mkdir -p "$GCCINSTALLDIR/usr/libexec/ld/$arch"
-                    ln -sf "$GCCDIR/usr/libexec/gcc/darwin/$arch/ld" "$GCCINSTALLDIR/usr/libexec/ld/$arch/ld"
-                done
+                if [ $XCODE42 -eq 0 ]; then
+                    for arch in i386 x86_64; do
+                        mkdir -p "$GCCDIR/usr/libexec/gcc/darwin/$arch"
+                        ln "$GCCDIR/usr/libexec/gcc/darwin/ppc/ld" "$GCCDIR/usr/libexec/gcc/darwin/$arch/ld"
+                        mkdir -p "$GCCINSTALLDIR/usr/libexec/ld/$arch"
+                        ln -sf "$GCCDIR/usr/libexec/gcc/darwin/$arch/ld" "$GCCINSTALLDIR/usr/libexec/ld/$arch/ld"
+                    done
+                fi
+                # This should happen with Mac OS X 10.6 (XCODE42)
+                if [ ! -f "$GCCINSTALLDIR/usr/bin/ld" ]; then
+                    ln -s /Developer/usr/bin/ld "$GCCINSTALLDIR/usr/bin/ld"
+                fi
                 # prevent overwriting the original ld if the script is run twice
                 if [ ! -f "$GCCINSTALLDIR/usr/bin/ld-original" ]; then
                     mv "$GCCINSTALLDIR/usr/bin/ld" "$GCCINSTALLDIR/usr/bin/ld-original"
@@ -814,16 +819,23 @@ AS_EOF
 
 ARCH=''
 ARCH_FOUND=0
+SDK=''
+SDK_FOUND=0
 for var in "\$@"
 do
         if [ "\$ARCH_FOUND" -eq '1' ]; then
                 ARCH=\$var
                 ARCH_FOUND=2
-                break
+        elif [ "\$SDK_FOUND" -eq '1' ]; then
+                SDK=\$var
+                SDK_FOUND=2
         else
                 case "\$var" in
                         -mmacosx-version-min=10.[0-6])
                                 MACOSX_DEPLOYMENT_TARGET=\$( echo \$var | sed -e s/-mmacosx-version-min=// )
+                                ;;
+                        -syslibroot)
+                                SDK_FOUND=1
                                 ;;
                         -arch)
                                 if [ "\$ARCH_FOUND" -ne '0' ]; then
@@ -835,23 +847,39 @@ do
         fi
 done
 
-# use the old (Snow Leopard 10.6) ld only if ppc arch or the target macOS is <= 10.6
 USE_OLD_LD=0
-case "\$ARCH" in
-        ppc*) #ppc ppc7400 ppc970 ppc64
-                USE_OLD_LD=1
-                ;;
-esac
+# Intentionally not escaped since there's no need to lookup the product version each run
+case "$(sw_vers -productVersion)" in
+    # If running on Snow Leopard we only want the old LD if we're using the 10.4u SDK
+    10.6*)
+        if [ -n \${SDK+x} ]; then
+                case "\${SDK}" in
+                        *10.4u.sdk)
+                                USE_OLD_LD=1
+                                ;;
+                esac
+        fi
+        ;;
 
-if [ -n \${MACOSX_DEPLOYMENT_TARGET+x} ]; then
-        # MACOSX_DEPLOYMENT_TARGET can either be set externally as an env variable,
-        # or as an ld option using -mmacosx-version-min=10.x
-        case "\${MACOSX_DEPLOYMENT_TARGET}" in
-                10.[0-6])
+    *)
+        # use the old (Snow Leopard 10.6) ld only if ppc arch or the target macOS is <= 10.6
+        case "\$ARCH" in
+                ppc*) #ppc ppc7400 ppc970 ppc64
                         USE_OLD_LD=1
                         ;;
         esac
-fi
+
+        if [ -n \${MACOSX_DEPLOYMENT_TARGET+x} ]; then
+                # MACOSX_DEPLOYMENT_TARGET can either be set externally as an env variable,
+                # or as an ld option using -mmacosx-version-min=10.x
+                case "\${MACOSX_DEPLOYMENT_TARGET}" in
+                        10.[0-6])
+                                USE_OLD_LD=1
+                                ;;
+                esac
+        fi
+        ;;
+esac
 
 #echo "Running ld for \$ARCH ..."
 
@@ -1107,7 +1135,12 @@ SPEC_EOF
             echo "*** Not modifying MacOSX Info.plist (found original at $PLATFORMDIR/Info.plist-original, uninstall first to force install)"
         elif [ -f "$PLATFORMDIR/Info.plist" ]; then
             mv "$PLATFORMDIR/Info.plist" "$PLATFORMDIR/Info.plist-original"
-            plutil -remove MinimumSDKVersion -o "$PLATFORMDIR/Info.plist" "$PLATFORMDIR/Info.plist-original"
+            # Xcode 10 uses a binary plist, but older versions of Mac OS X don't support the remove option in plutil
+            if [ $XCODE42 -eq 1 ]; then
+                sed -e '/MinimumSDKVersion/{N;d;}' < "$PLATFORMDIR/Info.plist-original" > "$PLATFORMDIR/Info.plist"
+            else
+                plutil -remove MinimumSDKVersion -o "$PLATFORMDIR/Info.plist" "$PLATFORMDIR/Info.plist-original"
+            fi
             echo "*** modified MacOSX Info.plist"
         fi
 
