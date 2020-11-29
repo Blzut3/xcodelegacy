@@ -53,10 +53,12 @@ Optionally, one of the following options can be passed as the *first* argument t
 * `-osx1012` : only install OSX 10.12 SDK
 * `-osx1013` : only install OSX 10.13 SDK
 * `-osx1014` : only install OSX 10.14 SDK
-* `-osx1014` : only install OSX 10.15 SDK
+* `-osx1015` : only install OSX 10.15 SDK
 * `-path=path` : install to custom Xcode at 'path'
+* `-plugins` : install Xcode compiler plugins
 Fixed non-working download paths.
 
+By default the Xcode compiler plugins are not installed as they require that the Xcode project be configured to use the deprecated legacy build system. These plugins are not needed if you are not using hand made Xcode projects.
 
 Using the older SDKs
 --------------------

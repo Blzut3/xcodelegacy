@@ -35,6 +35,7 @@
 #set -x # Print commands and their arguments as they are executed.
 
 compilers=0
+plugins=0
 osx104=0
 osx105=0
 osx106=0
@@ -55,6 +56,11 @@ while [[ $error = 0 ]] && [[ $# -gt 1 ]]; do
     case $1 in
         -compilers)
             compilers=1
+            gotoption=1
+            shift
+            ;;
+        -plugins)
+            plugins=1
             gotoption=1
             shift
             ;;
@@ -159,9 +165,8 @@ if [ $# != 1 ]; then
     echo " - Mac OS X SDK 10.4u, 10.5, 10.6, 10.7, 10.8, 10.9, 10.10, 10.11, 10.12, 10.13"
     echo ""
     echo "An optional first argument may be provided to limit the operation (by default"
-    echo "everything is done):"
-    echo " -compilers : only install the gcc and llvm-gcc compilers, as well as the"
-    echo "              corresponding Xcode plugins"
+    echo "everything except plugins is done):"
+    echo " -compilers : only install the gcc and llvm-gcc compilers"
     echo " -osx104    : only install Mac OSX 10.4 SDK"
     echo " -osx105    : only install Mac OSX 10.5 SDK"
     echo " -osx106    : only install Mac OSX 10.6 SDK"
@@ -176,6 +181,7 @@ if [ $# != 1 ]; then
     echo " -osx1015   : only install OSX 10.15 SDK"
     echo " -path=path : A alternative Xcode folder to use. Default is /Application/Xcode.app"
     echo "              e.g. -path=/Application/Xcode_8.3.1.app"
+    echo " -plugins   : only install Xcode plugins compilers (requires using \"legacy build system\")"
     echo "Note that these can be combined. For example, to build and install the 10.9"
     echo "and 10.10 SDKs, one could execute:"
     echo " $ $0 -osx109 -osx1010 buildpackages"
@@ -239,7 +245,7 @@ fi
 GCCFILES="usr/share/man/man7/fsf-funding.7 usr/share/man/man7/gfdl.7 usr/share/man/man7/gpl.7 usr/share/man/man1/*-4.0.1 usr/share/man/man1/*-4.0.1.1 usr/libexec/gcc/*-apple-darwin10/4.0.1 usr/lib/gcc/*-apple-darwin10/4.0.1 usr/include/gcc/darwin/4.0 usr/bin/*-4.0 usr/bin/*-4.0.1 usr/share/man/man1/*-4.2.1 usr/share/man/man1/*-4.2.1.1 usr/libexec/gcc/*-apple-darwin10/4.2.1 usr/lib/gcc/*-apple-darwin10/4.2.1 usr/include/gcc/darwin/4.2 usr/bin/*-4.2 usr/bin/*-4.2.1"
 LLVMGCCFILES="usr/llvm-gcc-4.2 usr/share/man/man1/llvm-g*.1.gz"
 
-xc3="$(( compilers + osx104 + osx105 + osx106 != 0 ))"
+xc3="$(( compilers + plugins + osx104 + osx105 + osx106 != 0 ))"
 xc4="$(( compilers + osx107 != 0 ))"
 xc5="$(( osx108 != 0 ))"
 xc6="$(( osx109 + osx1010 != 0 ))"
@@ -276,6 +282,12 @@ case $1 in
         # PHASE 1: PACKAGING
         #
         missingdmg=0
+
+        # Build plugins package if no options where given. We don't want to install them by default so we handle this here
+        if [ "$gotoption" = 0 ]; then
+            plugins=1
+        fi
+
         # note: Xcode links from http://stackoverflow.com/questions/10335747/how-to-download-xcode-4-5-6-7-and-get-the-dmg-file/10335943#10335943
         if [ "$xc3" = 1 ] && [ ! -f xcode_3.2.6_and_ios_sdk_4.3.dmg ]; then
             echo "*** You should download Xcode 3.2.6. Login to:"
@@ -287,7 +299,7 @@ case $1 in
             echo "and then run this script from within the same directory as the downloaded file"
             missingdmg=1
         fi
-        if [ "$xc4" = 1 ] && [ ! -f xcode4630916281a.dmg ]; then
+        if [ "$xc4" = 1 ]; then
             xcode4archive="xcode4630916281a.dmg"
             if [ ! -f xcode4630916281a.dmg ] && [ ! -f Xcode_4.6.3.dmg ]; then
                 echo "*** You should download Xcode 4.6.3. Login to:"
@@ -427,7 +439,7 @@ case $1 in
                 echo "Aborting"
                 exit
             fi
-            if [ "$compilers" = 1 ]; then
+            if [ "$plugins" = 1 ]; then
                 rm -rf /tmp/XC3
                 pkgutil --expand "$MNTDIR/Xcode and iOS SDK/Packages/DeveloperTools.pkg" /tmp/XC3
                 (cd /tmp/XC3 || exit; gzip -dc Payload | cpio -id --quiet Library/Xcode/Plug-ins) #we only need these, see https://github.com/devernay/xcodelegacy/issues/8
@@ -436,7 +448,9 @@ case $1 in
                 #( (cd /tmp/XC3/Library/Xcode/Plug-ins || exit; tar cf - "LLVM GCC 4.2.xcplugin") | gzip -c > XcodePluginLLVMGCC42.tar.gz) && echo "*** Created XcodePluginLLVMGCC42.tar.gz in directory $(pwd)"
                 # should be untarred in /Developer/Library/Xcode/PrivatePlugIns/Xcode3Core.ideplugin/Contents/SharedSupport/Developer/Library/Xcode/Plug-ins
                 # gzip -dc XcodePluginGCC40.tar.gz | (cd /Developer/Library/Xcode/PrivatePlugIns/Xcode3Core.ideplugin/Contents/SharedSupport/Developer/Library/Xcode/Plug-ins || exit; sudo tar xvf -)
+            fi
 
+            if [ "$compilers" = 1 ]; then
                 rm -rf /tmp/XC3
                 pkgutil --expand "$MNTDIR/Xcode and iOS SDK/Packages/DeveloperToolsCLI.pkg" /tmp/XC3
 
@@ -623,7 +637,7 @@ EOF
         if [ "$xc4" = 1 ]; then
             hdiutil attach "$xcode4archive" "${ATTACH_OPTS[@]}"
             if [ ! -d "$MNTDIR/Xcode" ]; then
-                echo "*** Error while trying to attach disk image xcode4630916281a.dmg"
+                echo "*** Error while trying to attach disk image $xcode4archive.dmg"
                 echo "Aborting"
                 rmdir "$MNTDIR"
                 exit
@@ -745,7 +759,7 @@ EOF
             echo "*** Error: could not find Xcode 4.2 in /Developer/Applications nor Xcode >= 4.3 in /Applications, cannot install"
             exit 1
         fi
-        if [ "$compilers" = 1 ]; then
+        if [ "$plugins" = 1 ]; then
             if [ "$gcc40" = 1 ]; then
                 if [ -d "$PLUGINDIR/GCC 4.0.xcplugin" ]; then
                     echo "*** Not installing XcodePluginGCC40.tar.gz (found installed in $PLUGINDIR/GCC 4.0.xcplugin, uninstall first to force install)"
@@ -785,7 +799,9 @@ EOF
             else
                 (gzip -dc XcodePluginLLVMGCC42.tar.gz | (cd "$PLUGINDIR" || exit; tar xf -)) && touch "$PLUGINDIR/LLVM GCC 4.2.xcplugin/legacy" && echo "*** installed XcodePluginLLVMGCC42.tar.gz"
             fi
+        fi
 
+        if [ "$compilers" = 1 ]; then
             if [ -f "$GCCDIR/usr/libexec/gcc/darwin/ppc/as" ]; then
                 echo "*** Not installing Xcode3as.tar.gz (found installed in $GCCDIR/usr/libexec/gcc/darwin/ppc/as, uninstall first to force install)"
             else
