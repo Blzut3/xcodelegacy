@@ -219,6 +219,13 @@ elif [ "$RELEASENUM" -lt 10 ]; then
     exit 1
 fi
 
+gcc40=1
+if [ "$RELEASENUM" -gt 18 ]; then
+    # macOS 10.15+ don't support i386 binaries so don't bother installing gcc-4.0
+    # NOTE: Although the 10.4u SDK requires using GCC 4.0, custom built compilers still can use it so the SDK should be installed regardless
+    gcc40=0
+fi
+
 GCCFILES="usr/share/man/man7/fsf-funding.7 usr/share/man/man7/gfdl.7 usr/share/man/man7/gpl.7 usr/share/man/man1/*-4.0.1 usr/share/man/man1/*-4.0.1.1 usr/libexec/gcc/*-apple-darwin10/4.0.1 usr/lib/gcc/*-apple-darwin10/4.0.1 usr/include/gcc/darwin/4.0 usr/bin/*-4.0 usr/bin/*-4.0.1 usr/share/man/man1/*-4.2.1 usr/share/man/man1/*-4.2.1.1 usr/libexec/gcc/*-apple-darwin10/4.2.1 usr/lib/gcc/*-apple-darwin10/4.2.1 usr/include/gcc/darwin/4.2 usr/bin/*-4.2 usr/bin/*-4.2.1"
 LLVMGCCFILES="usr/llvm-gcc-4.2 usr/share/man/man1/llvm-g*.1.gz"
 
@@ -662,20 +669,22 @@ EOF
             exit 1
         fi
         if [ "$compilers" = 1 ]; then
-            if [ -d "$PLUGINDIR/GCC 4.0.xcplugin" ]; then
-                echo "*** Not installing XcodePluginGCC40.tar.gz (found installed in $PLUGINDIR/GCC 4.0.xcplugin, uninstall first to force install)"
-            else
-                (gzip -dc XcodePluginGCC40.tar.gz | (cd "$PLUGINDIR" || exit; tar xf -)) && touch "$PLUGINDIR/GCC 4.0.xcplugin/legacy" && echo "*** installed XcodePluginGCC40.tar.gz"
-                # Add entries expected by later xcodebuilds.
-                mv "$PLUGINDIR/GCC 4.0.xcplugin/Contents/Resources/GCC 4.0.xcspec" "$PLUGINDIR/GCC 4.0.xcplugin/Contents/Resources/GCC 4.0.xcspec-original"
-                sed '$ i\
+            if [ "$gcc40" = 1 ]; then
+                if [ -d "$PLUGINDIR/GCC 4.0.xcplugin" ]; then
+                    echo "*** Not installing XcodePluginGCC40.tar.gz (found installed in $PLUGINDIR/GCC 4.0.xcplugin, uninstall first to force install)"
+                else
+                    (gzip -dc XcodePluginGCC40.tar.gz | (cd "$PLUGINDIR" || exit; tar xf -)) && touch "$PLUGINDIR/GCC 4.0.xcplugin/legacy" && echo "*** installed XcodePluginGCC40.tar.gz"
+                    # Add entries expected by later xcodebuilds.
+                    mv "$PLUGINDIR/GCC 4.0.xcplugin/Contents/Resources/GCC 4.0.xcspec" "$PLUGINDIR/GCC 4.0.xcplugin/Contents/Resources/GCC 4.0.xcspec-original"
+                    sed '$ i\
 \		ExecDescription = \"Compile \$\(InputFile\)\"\;\
 \		ProgressDescription = \"Compiling \$\(InputFile\)\"\;\
 \		ExecDescriptionForPrecompile = \"Precompile \$\(InputFile\)\"\;\
 \		ProgressDescriptionForPrecompile = \"Precompiling \$\(InputFile\)\"\;
 '  < "$PLUGINDIR/GCC 4.0.xcplugin/Contents/Resources/GCC 4.0.xcspec-original" > "$PLUGINDIR/GCC 4.0.xcplugin/Contents/Resources/GCC 4.0.xcspec"
 
-                echo "*** modified GCC 4.0.xcspec"
+                    echo "*** modified GCC 4.0.xcspec"
+                fi
             fi
             if [ -d "$PLUGINDIR/GCC 4.2.xcplugin" ] && [ ! -f "$PLUGINDIR/GCC 4.2.xcplugin/Contents/Resources/GCC Generic.xcspec" ]; then
                 echo "*** Not installing XcodePluginGCC42.tar.gz (found installed in $PLUGINDIR/GCC 4.2.xcplugin, uninstall first to force install)"
@@ -979,11 +988,16 @@ LD_EOF
                 echo "*** installed Xcode3ld.tar.gz"
             fi
 
-            if [ -f "$PLATFORMDIR/Developer/Library/Xcode/Specifications/MacOSX Architectures.xcspec-original" ]; then
-                echo "*** Not modifying MacOSX Architectures.xcspec (found original at $PLATFORMDIR/Developer/Library/Xcode/Specifications/MacOSX Architectures.xcspec-original, uninstall first to force install)"
+            ARCHSPEC="$PLATFORMDIR/Developer/Library/Xcode/Specifications/MacOSX Architectures.xcspec"
+            # This moved in Xcode 12
+            if [ ! -f "$ARCHSPEC" ]; then
+                ARCHSPEC="$PLATFORMDIR/Developer/Library/Xcode/PrivatePlugIns/IDEOSXSupportCore.ideplugin/Contents/Resources/MacOSX Architectures.xcspec"
+            fi
+            if [ -f "$ARCHSPEC-original" ]; then
+                echo "*** Not modifying MacOSX Architectures.xcspec (found original at $ARCHSPEC-original, uninstall first to force install)"
             else
-                mv "$PLATFORMDIR/Developer/Library/Xcode/Specifications/MacOSX Architectures.xcspec" "$PLATFORMDIR/Developer/Library/Xcode/Specifications/MacOSX Architectures.xcspec-original"
-                { awk 'NR>1{print l}{l=$0}' "$PLATFORMDIR/Developer/Library/Xcode/Specifications/MacOSX Architectures.xcspec-original"; cat - <<SPEC_EOF; } > "$PLATFORMDIR/Developer/Library/Xcode/Specifications/MacOSX Architectures.xcspec"
+                mv "$ARCHSPEC" "$ARCHSPEC-original"
+                { awk 'NR>1{print l}{l=$0}' "$ARCHSPEC-original"; cat - <<SPEC_EOF; } > "$ARCHSPEC"
         {
                 Type = Architecture;
                 Identifier = ppc;
@@ -1083,20 +1097,22 @@ SPEC_EOF
             installSDK 10.13
         fi
 
-		if [ "$osx1014" = 1 ]; then
+        if [ "$osx1014" = 1 ]; then
             installSDK 10.14
         fi
 
         if [ "$compilers" = 1 ]; then
-            if [ -f /usr/bin/gcc-4.0 ]; then
-                #echo "*** Not installing xcode_3.2.6_gcc4.0.pkg (found installed in /usr/bin/gcc-4.0, uninstall first to force install)"
-                echo "*** Not installing Xcode3gcc40.tar.gz (found installed in /usr/bin/gcc-4.0, uninstall first to force install)"
-            elif [ -f "$GCCINSTALLDIR/usr/bin/gcc-4.0" ]; then
-                echo "*** Not installing Xcode3gcc40.tar.gz (found installed in $GCCINSTALLDIR/usr/bin/gcc-4.0, uninstall first to force install)"
-            else
-                echo "*** Installing GCC 4.0"
-                #installer -pkg xcode_3.2.6_gcc4.0.pkg -target /
-                (gzip -dc Xcode3gcc40.tar.gz | (cd "$GCCINSTALLDIR" || exit; tar xf -)) && echo "*** installed Xcode3gcc40.tar.gz"
+            if [ "$gcc40" = 1 ]; then
+                if [ -f /usr/bin/gcc-4.0 ]; then
+                    #echo "*** Not installing xcode_3.2.6_gcc4.0.pkg (found installed in /usr/bin/gcc-4.0, uninstall first to force install)"
+                    echo "*** Not installing Xcode3gcc40.tar.gz (found installed in /usr/bin/gcc-4.0, uninstall first to force install)"
+                elif [ -f "$GCCINSTALLDIR/usr/bin/gcc-4.0" ]; then
+                    echo "*** Not installing Xcode3gcc40.tar.gz (found installed in $GCCINSTALLDIR/usr/bin/gcc-4.0, uninstall first to force install)"
+                else
+                    echo "*** Installing GCC 4.0"
+                    #installer -pkg xcode_3.2.6_gcc4.0.pkg -target /
+                    (gzip -dc Xcode3gcc40.tar.gz | (cd "$GCCINSTALLDIR" || exit; tar xf -)) && echo "*** installed Xcode3gcc40.tar.gz"
+                fi
             fi
             if [ -f /usr/bin/gcc-4.2 ]; then
                 #echo "*** Not installing xcode_3.2.6_gcc4.2.pkg (found installed in /usr/bin/gcc-4.2, uninstall first to force install)"
@@ -1132,7 +1148,11 @@ SPEC_EOF
             if [ ! -d "$GCCLINKDIR"/bin ]; then
                 mkdir -p "$GCCLINKDIR"/bin
             fi
-            for v in 4.0 4.2 4.0.1 4.2.1; do
+            vers="4.2 4.2.1"
+            if [ "$gcc40" = 1 ]; then
+                vers="4.0 4.0.1 $vers"
+            fi
+            for v in $vers; do
                 for i in c++ cpp g++ gcc gcov llvm-cpp llvm-g++ llvm-gcc; do
                     for p in i686-apple-darwin10- powerpc-apple-darwin10- ""; do
                         if [ -f "$GCCINSTALLDIR"/usr/bin/${p}${i}-${v} ]; then
