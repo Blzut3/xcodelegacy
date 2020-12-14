@@ -1068,10 +1068,10 @@ if [ "\$USE_OLD_LD" -eq '1' ]; then
                 exit 1
         fi
         
-        \`\$LD "\${ARGS[@]}"\`
+        "\$LD" "\${ARGS[@]}"
         LD_RESULT=\$?
 else
-        \`\$LDORIGINAL "\$@"\`
+        "\$LDORIGINAL" "\$@"
         LD_RESULT=\$?
 fi
 
